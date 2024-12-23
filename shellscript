@@ -1,46 +1,51 @@
 #!/bin/bash
 
-# Check if nc (netcat) is installed
+# Check for nc
 if ! command -v nc &> /dev/null; then
-    echo "Error: netcat (nc) is not installed. Please install it first."
+    echo "Error: netcat (nc) is not installed"
     exit 1
 fi
 
-# Input files
+# Files
 linux_vms_file="linux_vms.txt"
 windows_vms_file="windows_vms.txt"
-
-# Output files
 linux_output="linux_port_scan_results.txt"
 windows_output="windows_port_scan_results.txt"
 
-# Check input files exist
+# Check input files
 if [ ! -f "$linux_vms_file" ] || [ ! -f "$windows_vms_file" ]; then
-    echo "Error: VM list files not found."
-    echo "Please create $linux_vms_file and $windows_vms_file"
+    echo "Error: VM list files not found"
     exit 1
 fi
 
-# Timeout in seconds
 timeout=3
 
-# Function to check port
 check_port() {
     local host=$1
     local port=$2
     local os_type=$3
     local output_file=$4
     local result
+    local exit_code
 
     result=$(nc -vz -w $timeout $host $port 2>&1)
-    if [[ $result == *"succeeded"* ]] || [[ $result == *"Connected"* ]]; then
-        echo "[$os_type] $host:$port - OPEN" >> "$output_file"
-    else
-        echo "[$os_type] $host:$port - CLOSED" >> "$output_file"
+    exit_code=$?
+
+    if [[ $os_type == "Linux" ]]; then
+        if [[ $result == *"succeeded"* ]] || [[ $result == *"Connected"* ]]; then
+            echo "[$os_type] $host:$port - OPEN" >> "$output_file"
+        else
+            echo "[$os_type] $host:$port - CLOSED" >> "$output_file"
+        fi
+    else  # Windows
+        if [ $exit_code -eq 0 ]; then
+            echo "[$os_type] $host:$port - OPEN" >> "$output_file"
+        else
+            echo "[$os_type] $host:$port - CLOSED" >> "$output_file"
+        fi
     fi
 }
 
-# Initialize output files
 init_output_file() {
     local output_file=$1
     local os_type=$2
@@ -49,13 +54,13 @@ init_output_file() {
     echo "=================================" >> "$output_file"
 }
 
-echo "Starting port scan..."
+echo "Starting scan..."
 
 # Initialize outputs
 init_output_file "$linux_output" "Linux"
 init_output_file "$windows_output" "Windows"
 
-# Check Linux VMs
+# Linux VMs
 while IFS= read -r vm || [ -n "$vm" ]; do
     [[ -z "$vm" || "$vm" =~ ^[[:space:]]*# ]] && continue
     echo "Checking Linux VM: $vm..."
@@ -65,7 +70,7 @@ while IFS= read -r vm || [ -n "$vm" ]; do
     echo "---" >> "$linux_output"
 done < "$linux_vms_file"
 
-# Check Windows VMs
+# Windows VMs
 while IFS= read -r vm || [ -n "$vm" ]; do
     [[ -z "$vm" || "$vm" =~ ^[[:space:]]*# ]] && continue
     echo "Checking Windows VM: $vm..."
@@ -76,10 +81,10 @@ while IFS= read -r vm || [ -n "$vm" ]; do
 done < "$windows_vms_file"
 
 echo "Scan complete."
-echo "Linux VM results: $linux_output"
-echo "Windows VM results: $windows_output"
+echo "Linux results: $linux_output"
+echo "Windows results: $windows_output"
 
-# Display results
+# Show results
 echo -e "\nLinux VM Results:"
 cat "$linux_output"
 echo -e "\nWindows VM Results:"
