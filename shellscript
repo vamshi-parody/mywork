@@ -6,25 +6,22 @@ if ! command -v nc &> /dev/null; then
     exit 1
 fi
 
-# Input files for VM lists
+# Input files
 linux_vms_file="linux_vms.txt"
 windows_vms_file="windows_vms.txt"
 
 # Output files
 linux_output="linux_port_scan_results.txt"
 windows_output="windows_port_scan_results.txt"
-timestamp=$(date "+%Y%m%d_%H%M%S")
 
-# Check if input files exist
+# Check input files exist
 if [ ! -f "$linux_vms_file" ] || [ ! -f "$windows_vms_file" ]; then
     echo "Error: VM list files not found."
-    echo "Please create:"
-    echo "  - $linux_vms_file (one Linux VM hostname/IP per line)"
-    echo "  - $windows_vms_file (one Windows VM hostname/IP per line)"
+    echo "Please create $linux_vms_file and $windows_vms_file"
     exit 1
 fi
 
-# Timeout in seconds for connection attempts
+# Timeout in seconds
 timeout=3
 
 # Function to check port
@@ -33,40 +30,34 @@ check_port() {
     local port=$2
     local os_type=$3
     local output_file=$4
+    local result
 
-    # Use timeout command to prevent hanging
-    if nc -zv -w $timeout $host $port 2>&1 | grep -q "succeeded"; then
+    result=$(nc -vz -w $timeout $host $port 2>&1)
+    if [[ $result == *"succeeded"* ]] || [[ $result == *"Connected"* ]]; then
         echo "[$os_type] $host:$port - OPEN" >> "$output_file"
     else
         echo "[$os_type] $host:$port - CLOSED" >> "$output_file"
     fi
 }
 
-# Function to initialize output file
+# Initialize output files
 init_output_file() {
     local output_file=$1
     local os_type=$2
-    
-    # Clear the output file if it exists
     > "$output_file"
-    
-    # Add header
     echo "$os_type VM Port Scan Results - $(date)" >> "$output_file"
     echo "=================================" >> "$output_file"
 }
 
 echo "Starting port scan..."
 
-# Initialize output files
+# Initialize outputs
 init_output_file "$linux_output" "Linux"
 init_output_file "$windows_output" "Windows"
 
 # Check Linux VMs
-echo "Scanning Linux VMs..."
 while IFS= read -r vm || [ -n "$vm" ]; do
-    # Skip empty lines and comments
     [[ -z "$vm" || "$vm" =~ ^[[:space:]]*# ]] && continue
-    
     echo "Checking Linux VM: $vm..."
     echo -e "\nChecking $vm:" >> "$linux_output"
     check_port "$vm" 22 "Linux" "$linux_output"
@@ -75,11 +66,8 @@ while IFS= read -r vm || [ -n "$vm" ]; do
 done < "$linux_vms_file"
 
 # Check Windows VMs
-echo "Scanning Windows VMs..."
 while IFS= read -r vm || [ -n "$vm" ]; do
-    # Skip empty lines and comments
     [[ -z "$vm" || "$vm" =~ ^[[:space:]]*# ]] && continue
-    
     echo "Checking Windows VM: $vm..."
     echo -e "\nChecking $vm:" >> "$windows_output"
     check_port "$vm" 22 "Windows" "$windows_output"
@@ -88,15 +76,11 @@ while IFS= read -r vm || [ -n "$vm" ]; do
 done < "$windows_vms_file"
 
 echo "Scan complete."
-echo "Linux VM results saved to: $linux_output"
-echo "Windows VM results saved to: $windows_output"
+echo "Linux VM results: $linux_output"
+echo "Windows VM results: $windows_output"
 
-# Display Linux results
+# Display results
 echo -e "\nLinux VM Results:"
-echo "=================="
 cat "$linux_output"
-
-# Display Windows results
 echo -e "\nWindows VM Results:"
-echo "==================="
 cat "$windows_output"
