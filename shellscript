@@ -1,91 +1,97 @@
 #!/bin/bash
 
-# Check for nc
-if ! command -v nc &> /dev/null; then
-    echo "Error: netcat (nc) is not installed"
-    exit 1
-fi
+# Check dependencies
+for cmd in nc awk; do
+    if ! command -v $cmd &> /dev/null; then
+        echo "Error: $cmd is not installed"
+        exit 1
+    fi
+done
 
 # Files
-linux_vms_file="linux_vms.txt"
-windows_vms_file="windows_vms.txt"
-linux_output="linux_port_scan_results.txt"
-windows_output="windows_port_scan_results.txt"
-
-# Check input files
-if [ ! -f "$linux_vms_file" ] || [ ! -f "$windows_vms_file" ]; then
-    echo "Error: VM list files not found"
-    exit 1
-fi
-
-timeout=3
+linux_vms_file="linux_vms.csv"
+windows_vms_file="windows_vms.csv"
+linux_output="linux_port_scan_results.csv"
+windows_output="windows_port_scan_results.csv"
 
 check_port() {
-    local host=$1
-    local port=$2
-    local os_type=$3
-    local output_file=$4
+    local hostname=$1
+    local ip=$2
+    local port=$3
+    local os_type=$4
+    local output_file=$5
     local result
-    local exit_code
+    local status
+    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
 
-    result=$(nc -vz -w $timeout $host $port 2>&1)
+    result=$(nc -vz -w 3 $ip $port 2>&1)
     exit_code=$?
 
     if [[ $os_type == "Linux" ]]; then
         if [[ $result == *"succeeded"* ]] || [[ $result == *"Connected"* ]]; then
-            echo "[$os_type] $host:$port - OPEN" >> "$output_file"
+            status="OPEN"
         else
-            echo "[$os_type] $host:$port - CLOSED" >> "$output_file"
+            status="CLOSED"
         fi
     else  # Windows
-        if [ $exit_code -eq 0 ]; then
-            echo "[$os_type] $host:$port - OPEN" >> "$output_file"
+        if [ $port -eq 389 ]; then
+            if [[ $result == *"refused"* ]] || [ $exit_code -eq 0 ]; then
+                status="OPEN"
+            else
+                status="CLOSED"
+            fi
         else
-            echo "[$os_type] $host:$port - CLOSED" >> "$output_file"
+            if [ $exit_code -eq 0 ]; then
+                status="OPEN"
+            else
+                status="CLOSED"
+            fi
         fi
     fi
+    echo "$hostname,$ip,$port,$status,$timestamp" >> "$output_file"
 }
 
 init_output_file() {
     local output_file=$1
-    local os_type=$2
-    > "$output_file"
-    echo "$os_type VM Port Scan Results - $(date)" >> "$output_file"
-    echo "=================================" >> "$output_file"
+    echo "Hostname,IP Address,Port,Status,Timestamp" > "$output_file"
 }
 
 echo "Starting scan..."
 
-# Initialize outputs
-init_output_file "$linux_output" "Linux"
-init_output_file "$windows_output" "Windows"
+# Initialize output files
+init_output_file "$linux_output"
+init_output_file "$windows_output"
 
-# Linux VMs
-while IFS= read -r vm || [ -n "$vm" ]; do
-    [[ -z "$vm" || "$vm" =~ ^[[:space:]]*# ]] && continue
-    echo "Checking Linux VM: $vm..."
-    echo -e "\nChecking $vm:" >> "$linux_output"
-    check_port "$vm" 22 "Linux" "$linux_output"
-    check_port "$vm" 389 "Linux" "$linux_output"
-    echo "---" >> "$linux_output"
-done < "$linux_vms_file"
+# Process Linux VMs
+awk -F',' 'NR>1 {
+    gsub(/"/, "", $1);
+    gsub(/"/, "", $2);
+    gsub(/"/, "", $3);
+    if ($1 != "" && $2 != "") print $1","$2","$3
+}' "$linux_vms_file" | while IFS=',' read -r hostname ip ports; do
+    echo "Checking Linux VM: $hostname ($ip)..."
+    if [[ $ports == *"22"* ]]; then
+        check_port "$hostname" "$ip" 22 "Linux" "$linux_output"
+    fi
+    if [[ $ports == *"389"* ]]; then
+        check_port "$hostname" "$ip" 389 "Linux" "$linux_output"
+    fi
+done
 
-# Windows VMs
-while IFS= read -r vm || [ -n "$vm" ]; do
-    [[ -z "$vm" || "$vm" =~ ^[[:space:]]*# ]] && continue
-    echo "Checking Windows VM: $vm..."
-    echo -e "\nChecking $vm:" >> "$windows_output"
-    check_port "$vm" 22 "Windows" "$windows_output"
-    check_port "$vm" 389 "Windows" "$windows_output"
-    echo "---" >> "$windows_output"
-done < "$windows_vms_file"
+# Process Windows VMs
+awk -F',' 'NR>1 {
+    gsub(/"/, "", $1);
+    gsub(/"/, "", $2);
+    gsub(/"/, "", $3);
+    if ($1 != "" && $2 != "") print $1","$2","$3
+}' "$windows_vms_file" | while IFS=',' read -r hostname ip ports; do
+    echo "Checking Windows VM: $hostname ($ip)..."
+    if [[ $ports == *"22"* ]]; then
+        check_port "$hostname" "$ip" 22 "Windows" "$windows_output"
+    fi
+    if [[ $ports == *"389"* ]]; then
+        check_port "$hostname" "$ip" 389 "Windows" "$windows_output"
+    fi
+done
 
 echo "Scan complete."
-echo "Linux results: $linux_output"
-echo "Windows results: $windows_output"
-
-# Show results
-echo -e "\nLinux VM Results:"
-cat "$linux_output"
-echo -e "\nWindows VM Results:"
-cat "$windows_output"
