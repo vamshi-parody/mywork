@@ -8,10 +8,8 @@ for cmd in nc ping awk; do
     fi
 done
 
-linux_vms_file="linux_vms.csv"
-windows_vms_file="windows_vms.csv"
-linux_output="linux_port_scan_results.csv"
-windows_output="windows_port_scan_results.csv"
+input_file="servers.csv"
+output_file="server_status.csv"
 
 check_ping() {
     local ip=$1
@@ -24,65 +22,64 @@ check_ping() {
 }
 
 check_port() {
-    local hostname=$1
-    local ip=$2
-    local port=$3
-    local os_type=$4
-    local output_file=$5
-    local ping_status=$6
+    local ip=$1
+    local port=$2
     local result
-    local status
-    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-
+    
     result=$(nc -vz -w 3 $ip $port 2>&1)
     exit_code=$?
 
-    if [[ $os_type == "Linux" ]]; then
-        if [[ $result == *"succeeded"* ]] || [[ $result == *"Connected"* ]]; then
-            status="OPEN"
-        else
-            status="CLOSED"
-        fi
-    else  # Windows
+    if [ $port -eq 3889 ]; then
         if [[ $result == *"refused"* ]] || [ $exit_code -eq 0 ]; then
-            status="OPEN"
+            echo "OPEN"
         else
-            status="CLOSED"
+            echo "CLOSED"
+        fi
+    else
+        if [[ $result == *"succeeded"* ]] || [[ $result == *"Connected"* ]]; then
+            echo "OPEN"
+        else
+            echo "CLOSED"
         fi
     fi
-    echo "$hostname,$ip,$port,$status,$ping_status,$timestamp" >> "$output_file"
 }
 
-init_output_file() {
-    local output_file=$1
-    echo "Hostname,IP Address,Port,Status,Ping Status,Timestamp" > "$output_file"
-}
+# Initialize output file
+echo "timestamp,servername,servicestatus,serverstatuscode,cmdbapp,apmnumber,applicationname,recoverygroup,subdivision,rto,It department" > "$output_file"
 
-echo "Starting scan..."
-
-init_output_file "$linux_output"
-init_output_file "$windows_output"
-
-# Process Linux VMs - Port 22 only
+# Process servers
 awk -F',' 'NR>1 {
-    gsub(/"/, "", $1);
-    gsub(/"/, "", $2);
-    if ($1 != "" && $2 != "") print $1","$2
-}' "$linux_vms_file" | while IFS=',' read -r hostname ip; do
-    echo "Checking Linux VM: $hostname ($ip)..."
+    gsub(/"/, "");
+    if ($1 != "" && $2 != "") {
+        server=$1;
+        ip=$2;
+        type=$3;
+        cmdbapp=$4;
+        apm=$5;
+        recgroup=$6;
+        subdiv=$7;
+        rto=$8;
+        appname=$10;
+        
+        # Print all fields for processing
+        print server","ip","type","cmdbapp","apm","appname","recgroup","subdiv","rto
+    }
+}' "$input_file" | while IFS=',' read -r server ip type cmdbapp apm appname recgroup subdiv rto; do
+    echo "Checking server: $server"
+    timestamp=$(date '+%Y-%m-%d %H:%M:%S')
     ping_status=$(check_ping "$ip")
-    check_port "$hostname" "$ip" 22 "Linux" "$linux_output" "$ping_status"
-done
-
-# Process Windows VMs - Port 3889 only
-awk -F',' 'NR>1 {
-    gsub(/"/, "", $1);
-    gsub(/"/, "", $2);
-    if ($1 != "" && $2 != "") print $1","$2
-}' "$windows_vms_file" | while IFS=',' read -r hostname ip; do
-    echo "Checking Windows VM: $hostname ($ip)..."
-    ping_status=$(check_ping "$ip")
-    check_port "$hostname" "$ip" 3889 "Windows" "$windows_output" "$ping_status"
+    
+    # Determine port based on server type
+    if [[ "${type,,}" == *"linux"* ]]; then
+        port=22
+    else
+        port=3889
+    fi
+    
+    service_status=$(check_port "$ip" "$port")
+    it_dept="IT" # Add logic for IT department if needed
+    
+    echo "$timestamp,$server,$service_status,$ping_status,$cmdbapp,$apm,$appname,$recgroup,$subdiv,$rto,$it_dept" >> "$output_file"
 done
 
 echo "Scan complete."
