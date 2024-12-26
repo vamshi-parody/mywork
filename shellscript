@@ -13,7 +13,7 @@ output_file="server_status.csv"
 
 check_ping() {
     local ip=$1
-    ping -c 1 -W 2 $ip >/dev/null 2>&1
+    ping -c 1 -W 2 "$ip" >/dev/null 2>&1
     if [ $? -eq 0 ]; then
         echo "UP"
     else
@@ -26,7 +26,7 @@ check_port() {
     local port=$2
     local result
     
-    result=$(nc -vz -w 3 $ip $port 2>&1)
+    result=$(nc -vz -w 3 "$ip" "$port" 2>&1)
     exit_code=$?
 
     if [ $port -eq 3889 ]; then
@@ -47,35 +47,38 @@ check_port() {
 # Initialize output file
 echo "timestamp,servername,servicestatus,serverstatuscode,cmdbapp,apmnumber,applicationname,recoverygroup,subdivision,rto,It department" > "$output_file"
 
-# Read header line
-read header < "$input_file"
-
-# Process each line
-tail -n +2 "$input_file" | while IFS=',' read -r servername serveripaddress asserttype cmdbappname apmnumber recoverygroup subdivisionrto number prefix appname dnsdomain priority osversion scope; do
-    # Skip empty lines
-    [ -z "$servername" ] && continue
+# Process CSV with awk
+awk -F',' '
+NR > 1 {
+    gsub(/^[ \t]+|[ \t]+$/, "", $1);  # Trim servername
+    gsub(/^[ \t]+|[ \t]+$/, "", $2);  # Trim serveripaddress
+    gsub(/^[ \t]+|[ \t]+$/, "", $3);  # Trim asserttype
+    
+    if ($1 != "" && $2 != "") {
+        print $1","$2","$3","$4","$5","$6","$7","$10
+    }
+}' "$input_file" | while IFS=',' read -r servername serverip asserttype cmdbapp apm recgroup subdiv appname; do
+    echo "Processing: $servername, IP: $serverip, Type: $asserttype"
     
     timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    ping_status=$(check_ping "$serverip")
     
-    # Check server IP
-    ping_status=$(check_ping "$serveripaddress")
-    
-    # Determine port based on asserttype
+    # Determine port based on asserttype (case insensitive)
     if [[ "${asserttype,,}" == *"linux"* ]]; then
         port=22
     else
         port=3889
     fi
     
-    service_status=$(check_port "$serveripaddress" "$port")
+    service_status=$(check_port "$serverip" "$port")
     
-    # Extract RTO from subdivisionrto if needed (add processing if required)
-    rto=$subdivisionrto
+    echo "$timestamp,$servername,$service_status,$ping_status,$cmdbapp,$apm,$appname,$recgroup,$subdiv,$subdiv,IT" >> "$output_file"
     
-    # Write to output file, maintaining input order
-    echo "$timestamp,$servername,$service_status,$ping_status,$cmdbappname,$apmnumber,$appname,$recoverygroup,$subdivisionrto,$rto,IT" >> "$output_file"
-    
-    echo "Processed: $servername"
+    echo "Completed checking $servername ($serverip)"
 done
 
 echo "Scan complete. Results saved to $output_file"
+
+# Debug: Display first few lines of output
+echo "Content of $output_file:"
+head -n 5 "$output_file"
