@@ -47,39 +47,35 @@ check_port() {
 # Initialize output file
 echo "timestamp,servername,servicestatus,serverstatuscode,cmdbapp,apmnumber,applicationname,recoverygroup,subdivision,rto,It department" > "$output_file"
 
-# Process all servers from input file
-awk -F',' 'NR>1 {
-    gsub(/"/, "");
-    if ($1 != "" && $2 != "") {
-        # Map column positions based on input CSV structure
-        server=$1;
-        ip=$2;
-        type=$3;
-        cmdbapp=$4;
-        apm=$5;
-        recgroup=$6;
-        subdiv=$7;
-        rto=$7;  # Extract RTO from subdivisionrto if needed
-        appname=$10;
-        
-        # Check if server type contains "linux" or "windows" (case-insensitive)
-        if (tolower(type) ~ /linux/) {
-            port=22;
-        } else if (tolower(type) ~ /windows/) {
-            port=3889;
-        } else {
-            next;  # Skip if type is neither
-        }
-        
-        print server","ip","port","type","cmdbapp","apm","appname","recgroup","subdiv","rto
-    }
-}' "$input_file" | while IFS=',' read -r server ip port type cmdbapp apm appname recgroup subdiv rto; do
-    echo "Checking $server ($ip)"
-    timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-    ping_status=$(check_ping "$ip")
-    service_status=$(check_port "$ip" "$port")
+# Read header line
+read header < "$input_file"
+
+# Process each line
+tail -n +2 "$input_file" | while IFS=',' read -r servername serveripaddress asserttype cmdbappname apmnumber recoverygroup subdivisionrto number prefix appname dnsdomain priority osversion scope; do
+    # Skip empty lines
+    [ -z "$servername" ] && continue
     
-    echo "$timestamp,$server,$service_status,$ping_status,$cmdbapp,$apm,$appname,$recgroup,$subdiv,$rto,IT" >> "$output_file"
+    timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    
+    # Check server IP
+    ping_status=$(check_ping "$serveripaddress")
+    
+    # Determine port based on asserttype
+    if [[ "${asserttype,,}" == *"linux"* ]]; then
+        port=22
+    else
+        port=3889
+    fi
+    
+    service_status=$(check_port "$serveripaddress" "$port")
+    
+    # Extract RTO from subdivisionrto if needed (add processing if required)
+    rto=$subdivisionrto
+    
+    # Write to output file, maintaining input order
+    echo "$timestamp,$servername,$service_status,$ping_status,$cmdbappname,$apmnumber,$appname,$recoverygroup,$subdivisionrto,$rto,IT" >> "$output_file"
+    
+    echo "Processed: $servername"
 done
 
 echo "Scan complete. Results saved to $output_file"
