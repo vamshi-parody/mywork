@@ -1,18 +1,27 @@
 #!/bin/bash
 
 # Check dependencies
-for cmd in nc awk; do
+for cmd in nc ping awk; do
     if ! command -v $cmd &> /dev/null; then
         echo "Error: $cmd is not installed"
         exit 1
     fi
 done
 
-# Files
 linux_vms_file="linux_vms.csv"
 windows_vms_file="windows_vms.csv"
 linux_output="linux_port_scan_results.csv"
 windows_output="windows_port_scan_results.csv"
+
+check_ping() {
+    local ip=$1
+    ping -c 1 -W 2 $ip >/dev/null 2>&1
+    if [ $? -eq 0 ]; then
+        echo "UP"
+    else
+        echo "DOWN"
+    fi
+}
 
 check_port() {
     local hostname=$1
@@ -20,6 +29,7 @@ check_port() {
     local port=$3
     local os_type=$4
     local output_file=$5
+    local ping_status=$6
     local result
     local status
     local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
@@ -34,64 +44,45 @@ check_port() {
             status="CLOSED"
         fi
     else  # Windows
-        if [ $port -eq 389 ]; then
-            if [[ $result == *"refused"* ]] || [ $exit_code -eq 0 ]; then
-                status="OPEN"
-            else
-                status="CLOSED"
-            fi
+        if [[ $result == *"refused"* ]] || [ $exit_code -eq 0 ]; then
+            status="OPEN"
         else
-            if [ $exit_code -eq 0 ]; then
-                status="OPEN"
-            else
-                status="CLOSED"
-            fi
+            status="CLOSED"
         fi
     fi
-    echo "$hostname,$ip,$port,$status,$timestamp" >> "$output_file"
+    echo "$hostname,$ip,$port,$status,$ping_status,$timestamp" >> "$output_file"
 }
 
 init_output_file() {
     local output_file=$1
-    echo "Hostname,IP Address,Port,Status,Timestamp" > "$output_file"
+    echo "Hostname,IP Address,Port,Status,Ping Status,Timestamp" > "$output_file"
 }
 
 echo "Starting scan..."
 
-# Initialize output files
 init_output_file "$linux_output"
 init_output_file "$windows_output"
 
-# Process Linux VMs
+# Process Linux VMs - Port 22 only
 awk -F',' 'NR>1 {
     gsub(/"/, "", $1);
     gsub(/"/, "", $2);
-    gsub(/"/, "", $3);
-    if ($1 != "" && $2 != "") print $1","$2","$3
-}' "$linux_vms_file" | while IFS=',' read -r hostname ip ports; do
+    if ($1 != "" && $2 != "") print $1","$2
+}' "$linux_vms_file" | while IFS=',' read -r hostname ip; do
     echo "Checking Linux VM: $hostname ($ip)..."
-    if [[ $ports == *"22"* ]]; then
-        check_port "$hostname" "$ip" 22 "Linux" "$linux_output"
-    fi
-    if [[ $ports == *"389"* ]]; then
-        check_port "$hostname" "$ip" 389 "Linux" "$linux_output"
-    fi
+    ping_status=$(check_ping "$ip")
+    check_port "$hostname" "$ip" 22 "Linux" "$linux_output" "$ping_status"
 done
 
-# Process Windows VMs
+# Process Windows VMs - Port 3889 only
 awk -F',' 'NR>1 {
     gsub(/"/, "", $1);
     gsub(/"/, "", $2);
-    gsub(/"/, "", $3);
-    if ($1 != "" && $2 != "") print $1","$2","$3
-}' "$windows_vms_file" | while IFS=',' read -r hostname ip ports; do
+    if ($1 != "" && $2 != "") print $1","$2
+}' "$windows_vms_file" | while IFS=',' read -r hostname ip; do
     echo "Checking Windows VM: $hostname ($ip)..."
-    if [[ $ports == *"22"* ]]; then
-        check_port "$hostname" "$ip" 22 "Windows" "$windows_output"
-    fi
-    if [[ $ports == *"389"* ]]; then
-        check_port "$hostname" "$ip" 389 "Windows" "$windows_output"
-    fi
+    ping_status=$(check_ping "$ip")
+    check_port "$hostname" "$ip" 3889 "Windows" "$windows_output" "$ping_status"
 done
 
 echo "Scan complete."
