@@ -8,7 +8,7 @@ for cmd in nc ping awk; do
     fi
 done
 
-input_file="servers.csv"
+input_file="input.csv"
 output_file="server_status.csv"
 
 check_ping() {
@@ -47,10 +47,11 @@ check_port() {
 # Initialize output file
 echo "timestamp,servername,servicestatus,serverstatuscode,cmdbapp,apmnumber,applicationname,recoverygroup,subdivision,rto,It department" > "$output_file"
 
-# Process servers
+# Process all servers from input file
 awk -F',' 'NR>1 {
     gsub(/"/, "");
     if ($1 != "" && $2 != "") {
+        # Map column positions based on input CSV structure
         server=$1;
         ip=$2;
         type=$3;
@@ -58,28 +59,27 @@ awk -F',' 'NR>1 {
         apm=$5;
         recgroup=$6;
         subdiv=$7;
-        rto=$8;
+        rto=$7;  # Extract RTO from subdivisionrto if needed
         appname=$10;
         
-        # Print all fields for processing
-        print server","ip","type","cmdbapp","apm","appname","recgroup","subdiv","rto
+        # Check if server type contains "linux" or "windows" (case-insensitive)
+        if (tolower(type) ~ /linux/) {
+            port=22;
+        } else if (tolower(type) ~ /windows/) {
+            port=3889;
+        } else {
+            next;  # Skip if type is neither
+        }
+        
+        print server","ip","port","type","cmdbapp","apm","appname","recgroup","subdiv","rto
     }
-}' "$input_file" | while IFS=',' read -r server ip type cmdbapp apm appname recgroup subdiv rto; do
-    echo "Checking server: $server"
+}' "$input_file" | while IFS=',' read -r server ip port type cmdbapp apm appname recgroup subdiv rto; do
+    echo "Checking $server ($ip)"
     timestamp=$(date '+%Y-%m-%d %H:%M:%S')
     ping_status=$(check_ping "$ip")
-    
-    # Determine port based on server type
-    if [[ "${type,,}" == *"linux"* ]]; then
-        port=22
-    else
-        port=3889
-    fi
-    
     service_status=$(check_port "$ip" "$port")
-    it_dept="IT" # Add logic for IT department if needed
     
-    echo "$timestamp,$server,$service_status,$ping_status,$cmdbapp,$apm,$appname,$recgroup,$subdiv,$rto,$it_dept" >> "$output_file"
+    echo "$timestamp,$server,$service_status,$ping_status,$cmdbapp,$apm,$appname,$recgroup,$subdiv,$rto,IT" >> "$output_file"
 done
 
-echo "Scan complete."
+echo "Scan complete. Results saved to $output_file"
