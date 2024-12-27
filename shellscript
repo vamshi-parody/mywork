@@ -50,28 +50,11 @@ check_port() {
 echo "TimeStamp,ServerName,ServerStatus,ServerStatusCode,CMDBAppName,APMNumber,ApplicationName,RecoveryGroup,SubDivision,RTO" >"$output_file"
 
 # Process the input CSV
-awk -F',' 'NR > 1 { print $0 }' "$input_file" | while IFS=',' read -r servername serverip asserttype cmdbapp apm appname recgroup subdiv rto; do
+awk -F',' 'NR > 1 { print $0 }' "$input_file" | while IFS=',' read -r servername serverip asserttype cmdbapp apm appname recgroup subdiv rto other_columns; do
     # Timestamp for each entry
     timestamp=$(date '+%Y-%m-%d %H:%M:%S')
 
     # Ping status
     ping_status=$(check_ping "$serverip")
 
-    # Port selection based on assert type
-    if [[ "${asserttype,,}" == *"linux"* ]]; then
-        port=22
-    elif [[ "${asserttype,,}" == *"windows"* ]]; then
-        port=3389
-    else
-        echo "Skipping $servername: Unknown AssertType $asserttype"
-        continue
-    fi
-
-    # Port status
-    service_status=$(check_port "$serverip" "$port")
-
-    # Append to the output CSV
-    echo "$timestamp,$servername,$service_status,$ping_status,$cmdbapp,$apm,$appname,$recgroup,$subdiv,$rto" >>"$output_file"
-done
-
-echo "Scan complete. Results saved to $output_file"
+    # Port se
