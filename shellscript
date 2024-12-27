@@ -4,46 +4,42 @@ input_file="input.csv"
 output_file="output.csv"
 timestamp=$(date '+%Y-%m-%d %H:%M:%S')
 
-# Create header for output file
 echo "TimeStamp,ServerName,ServerStatus,ServerStatusCode,CMDBAppName,APMNumber,ApplicationName,RecoveryGroup,SubDivision,RTO" > "$output_file"
 
-# Skip header line and process CSV
 tail -n +2 "$input_file" | while IFS=, read -r ServerName IP AssertType CMDBAppName APMNumber RecoveryGroup SubDivision RTO ITDepartment number CMDBPrefix AppServiceName DNSDomain RecoveryStartupPriority OSVersion InTestScope
 do
     # Check port based on Assert Type
     if [[ "${AssertType,,}" == *"linux"* ]]; then
         nc -zv -w1 "$IP" 22 >/dev/null 2>&1
-        port_status=$?
+        if [ $? -eq 0 ]; then
+            server_status="UP"
+        else
+            server_status="DOWN"
+        fi
     else
         nc -zv -w1 "$IP" 3389 >/dev/null 2>&1
-        port_status=$?
+        if [ $? -eq 0 ]; then
+            server_status="UP"
+        else
+            server_status="DOWN"
+        fi
     fi
     
     # Check ping status
     ping -c1 -W1 "$IP" >/dev/null 2>&1
     ping_status=$?
     
-    # Set server status
-    if [ $port_status -eq 0 ]; then
-        server_status="UP"
-    else
-        server_status="DOWN"
-    fi
-    
-    # Set ping status code
     if [ $ping_status -eq 0 ]; then
         status_code="1"
     else
         status_code="0"
     fi
     
-    # Set RTO based on SubDivision
     if [[ "$SubDivision" == "FAS Technology" ]]; then
         rto="0-6 Hours"
     else
         rto="6-24 Hours"
     fi
     
-    # Write to output file
     echo "$timestamp,$ServerName,$server_status,$status_code,$CMDBAppName,$APMNumber,$AppServiceName,$RecoveryGroup,$SubDivision,$rto" >> "$output_file"
 done
