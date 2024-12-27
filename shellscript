@@ -1,69 +1,35 @@
 #!/bin/bash
 
-input_file="input.csv"
-output_file="server_status.csv"
+# Input and output file paths
+INPUT_FILE="input.csv"
+OUTPUT_FILE="output.csv"
 
-check_ping() {
-    local ip=$1
-    ping -c 1 -W 2 "$ip" >/dev/null 2>&1
-    if [ $? -eq 0 ]; then
-        echo "1"
-    else
-        echo "0"
-    fi
-}
+# Ensure the output file has a header
+echo "TimeStamp,ServerName,ServerStatus,ServerStatusCode,CMDBAppName,APMNumber,ApplicationName,RecoveryGroup,SubDivision,RTO" > "$OUTPUT_FILE"
 
-check_port() {
-    local ip=$1
-    local port=$2
-    local result
-    
-    result=$(nc -vz -w 3 "$ip" "$port" 2>&1)
-    exit_code=$?
-    if [ $port -eq 3889 ]; then
-        if [[ $result == *"refused"* ]] || [ $exit_code -eq 0 ]; then
-            echo "OPEN"
-        else
-            echo "CLOSED"
-        fi
+# Skip the header of the input CSV file
+tail -n +2 "$INPUT_FILE" | while IFS=',' read -r ServerName ServerIPAddress AssertType CMDBAppName APMNumber RecoveryGroup SubDivision RTO _; do
+    # Determine port based on AssertType
+    if [[ "$AssertType" =~ [Ll]inux ]]; then
+        PORT=22
+    elif [[ "$AssertType" =~ [Ww]indows ]]; then
+        PORT=3389
     else
-        if [[ $result == *"succeeded"* ]] || [[ $result == *"Connected"* ]]; then
-            echo "OPEN"
-        else
-            echo "CLOSED"
-        fi
+        continue # Skip if AssertType is neither Linux nor Windows
     fi
-}
 
-echo "timestamp,servername,servicestatus,serverstatuscode,cmdbapp,apmnumber,applicationname,recoverygroup,subdivision,rto" > "$output_file"
+    # Check server status (nc for port and ping for connectivity)
+    nc -z -w 5 "$ServerIPAddress" "$PORT" &>/dev/null
+    ServerStatus=$([[ $? -eq 0 ]] && echo "Up" || echo "Down")
 
-awk -F',' '
-NR > 1 {
-    gsub(/^[ \t]+|[ \t]+$/, "", $1);
-    gsub(/^[ \t]+|[ \t]+$/, "", $2);
-    gsub(/^[ \t]+|[ \t]+$/, "", $3);
-    
-    if ($1 != "" && $2 != "") {
-        print $1","$2","$3","$4","$5","$6","$7","$10
-    }
-}' "$input_file" | while IFS=',' read -r servername serverip asserttype cmdbapp apm recgroup subdiv appname; do
-    timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-    ping_status=$(check_ping "$serverip")
-    
-    if [[ "${asserttype,,}" == *"linux"* ]]; then
-        port=22
-    else
-        port=3889
-    fi
-    
-    service_status=$(check_port "$serverip" "$port")
-    
-    if [[ "$subdiv" == "FAS Technology" ]]; then
-        rto="0-6 Hours"
-    else
-        rto="6-24 Hours"
-    fi
-    
-    echo "$timestamp,$servername,$service_status,$ping_status,$cmdbapp,$apm,$appname,$recgroup,$subdiv,$rto" >> "$output_file"
+    ping -c 1 -W 5 "$ServerIPAddress" &>/dev/null
+    ServerStatusCode=$([[ $? -eq 0 ]] && echo "1" || echo "0")
+
+    # Timestamp
+    TimeStamp=$(date '+%Y-%m-%d %H:%M:%S')
+
+    # Write output to the CSV
+    echo "$TimeStamp,$ServerName,$ServerStatus,$ServerStatusCode,$CMDBAppName,$APMNumber,$ServerName,$RecoveryGroup,$SubDivision,$RTO" >> "$OUTPUT_FILE"
 done
-echo "Scan complete. Results saved to $output_file"
+
+echo "Processing complete. Output written to $OUTPUT_FILE"
