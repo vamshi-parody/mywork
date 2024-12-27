@@ -50,7 +50,7 @@ check_port() {
 echo "TimeStamp,ServerName,ServerStatus,ServerStatusCode,CMDBAppName,APMNumber,ApplicationName,RecoveryGroup,SubDivision,RTO" >"$output_file"
 
 # Process the input CSV
-awk -F',' 'NR > 1 { print $0 }' "$input_file" | while IFS=',' read -r servername serverip asserttype cmdbapp apm appname recgroup subdiv rto _; do
+awk -F',' 'NR > 1 { print $1 "," $2 "," $3 "," $4 "," $5 "," $6 "," $7 "," $8 "," $9 }' "$input_file" | while IFS=',' read -r servername serverip asserttype cmdbapp apm appname recgroup subdiv rto; do
     # Timestamp for each entry
     timestamp=$(date '+%Y-%m-%d %H:%M:%S')
 
