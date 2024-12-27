@@ -1,3 +1,2 @@
-servername,serveripaddress,asserttype,cmdbappname,apmnumber,recoverygroup,subdivisionrto,number,cmdb application prefix,Application Service Name,DNSDomain,Recovery Startup Priority,os version,intestscope
-server1,192.168.1.10,Linux,App1,APM001,RG1,SubDiv1,1,Prefix1,AppService1,domain.com,1,RHEL7,Yes
-server2,192.168.1.11,Windows,App2,APM002,RG2,SubDiv2,2,Prefix2,AppService2,domain.com,2,Win2019,Yes
+ServerName,Server IP Address,Assert Type,CMDBAppName,APMNumber,RecoveryGroup,SubDivision,RTO,IT Department,number,CMDB Application Prefix,Application Service Name,DNSDomain,Recovery Startup Priority,OS Version,InTestScope
+
