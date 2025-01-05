@@ -46,32 +46,47 @@ check_port() {
     fi
 }
 
-# Initialize the output CSV file with a header
-echo "TimeStamp,ServerName,ServerStatus,ServerStatusCode,CMDBAppName,APMNumber,ApplicationName,RecoveryGroup,SubDivision,RTO" >"$output_file"
+# Function to process the input CSV
+process_csv() {
+    # Initialize the output CSV file with a header
+    echo "TimeStamp,ServerName,ServerStatus,ServerStatusCode,CMDBAppName,APMNumber,ApplicationName,RecoveryGroup,SubDivision,RTO" >"$output_file"
 
-# Process the input CSV
-awk -F',' 'NR > 1 { print $1 "," $2 "," $3 "," $4 "," $5 "," $6 "," $7 "," $8 "," $9 }' "$input_file" | while IFS=',' read -r servername serverip asserttype cmdbapp apm appname recgroup subdiv rto; do
-    # Timestamp for each entry
-    timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    # Process the input CSV
+    awk -F',' 'NR > 1 { print $1 "," $2 "," $3 "," $4 "," $5 "," $6 "," $7 "," $8 "," $9 }' "$input_file" | while IFS=',' read -r servername serverip asserttype cmdbapp apm appname recgroup subdiv rto; do
+        # Timestamp for each entry
+        timestamp=$(date '+%Y-%m-%d %H:%M:%S')
 
-    # Ping status
-    ping_status=$(check_ping "$serverip")
+        # Ping status
+        ping_status=$(check_ping "$serverip")
 
-    # Port selection based on assert type
-    if [[ "${asserttype,,}" == *"linux"* ]]; then
-        port=22
-    elif [[ "${asserttype,,}" == *"windows"* ]]; then
-        port=3389
-    else
-        echo "Skipping $servername: Unknown AssertType $asserttype"
-        continue
-    fi
+        # Port selection based on assert type
+        if [[ "${asserttype,,}" == *"linux"* ]]; then
+            port=22
+        elif [[ "${asserttype,,}" == *"windows"* ]]; then
+            port=3389
+        else
+            echo "Skipping $servername: Unknown AssertType $asserttype"
+            continue
+        fi
 
-    # Port status
-    service_status=$(check_port "$serverip" "$port")
+        # Port status
+        service_status=$(check_port "$serverip" "$port")
 
-    # Append to the output CSV
-    echo "$timestamp,$servername,$service_status,$ping_status,$cmdbapp,$apm,$appname,$recgroup,$subdiv,$rto" >>"$output_file"
-done
+        # Append to the output CSV
+        echo "$timestamp,$servername,$service_status,$ping_status,$cmdbapp,$apm,$appname,$recgroup,$subdiv,$rto" >>"$output_file"
+    done
 
-echo "Scan complete. Results saved to $output_file"
+    echo "Scan complete at $(date). Results saved to $output_file"
+}
+
+# Main loop to run every 5 minutes
+(
+    while true; do
+        echo "Starting a new scan at $(date)..."
+        process_csv
+        echo "Waiting for 5 minutes before the next run..."
+        sleep 300  # Wait for 5 minutes
+    done
+) &
+
+echo "Script is now running in the background. Process ID: $!"
