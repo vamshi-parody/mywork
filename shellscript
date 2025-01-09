@@ -48,6 +48,14 @@ check_port() {
 
 # Function to process the input CSV
 process_csv() {
+    # Backup the previous output file with a timestamp
+    if [[ -f "$output_file" ]]; then
+        timestamp=$(date '+%Y%m%d_%H%M%S')
+        backup_file="${output_file%.csv}_backup_$timestamp.csv"
+        cp "$output_file" "$backup_file"
+        echo "Backup saved: $backup_file"
+    fi
+
     # Initialize the output CSV file with a header
     echo "TimeStamp,ServerName,ServerStatus,ServerStatusCode,CMDBAppName,APMNumber,ApplicationName,RecoveryGroup,SubDivision,RTO" >"$output_file"
 
