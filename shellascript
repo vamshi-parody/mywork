@@ -1,0 +1,32 @@
+---
+- name: Deploy and Execute Shell Script
+  hosts: target_servers  # Define your target hosts in inventory
+  become: yes  # Use sudo if required
+  
+  vars:
+    script_path: "/home/test"
+    script_name: "test_script.sh"
+    script_mode: "0755"  # Execute permissions
+
+  tasks:
+    - name: Ensure target directory exists
+      file:
+        path: "{{ script_path }}"
+        state: directory
+        mode: "0755"
+
+    - name: Copy shell script to target servers
+      copy:
+        src: "files/{{ script_name }}"  # Place your script in playbook's 'files' directory
+        dest: "{{ script_path }}/{{ script_name }}"
+        mode: "{{ script_mode }}"
+        backup: yes  # Keep backup of existing script if any
+
+    - name: Execute the shell script
+      shell: "{{ script_path }}/{{ script_name }}"
+      register: script_output
+      changed_when: true  # Consider script execution as a change
+
+    - name: Display script output
+      debug:
+        var: script_output.stdout_lines
