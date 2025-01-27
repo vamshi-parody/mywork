@@ -1,51 +1,73 @@
 ---
-- name: Minimal ServiceNow Change Record and Tasks Validation
+- name: Validate ServiceNow Change Request and Change Task
   hosts: localhost
   gather_facts: no
+
   vars:
-    cr_number: "{{ cr_number }}"
-    task_list: "{{ task_list }}"
-    api_base: "https://{{ snow_instance }}/api/now/table"
-    headers: {"Accept": "application/json"}
-    today: "{{ lookup('pipe', 'date +%Y-%m-%d') }}"
+    servicenow_instance: "your-instance.service-now.com"  # Replace with your ServiceNow instance
+    servicenow_username: "your-username"  # Replace with your ServiceNow username
+    servicenow_password: "your-password"  # Replace with your ServiceNow password
+    change_request_number: "{{ survey_cr_number }}"  # CR number input from survey
+    valid_states: ["approved", "open"]
 
   tasks:
-    - name: Validate Change Record
+    - name: Validate Change Request existence in ServiceNow
       uri:
-        url: "{{ api_base }}/change_request?sysparm_query=number={{ cr_number }}&sysparm_fields=state,start_date"
+        url: "https://{{ servicenow_instance }}/api/now/table/change_request?sysparm_query=number={{ change_request_number }}"
         method: GET
-        user: "{{ snow_user }}"
-        password: "{{ snow_pass }}"
+        user: "{{ servicenow_username }}"
+        password: "{{ servicenow_password }}"
         force_basic_auth: yes
-        headers: "{{ headers }}"
         return_content: yes
-      register: cr
-      failed_when: >
-        cr.json.result | length == 0 or
-        cr.json.result[0].state != 'approved' or
-        cr.json.result[0].start_date | regex_replace('T.*', '') != today
+        headers:
+          Accept: "application/json"
+      register: cr_response
+      no_log: true  # Hides sensitive info in logs
+
+    - name: Check if the Change Request number exists
+      fail:
+        msg: "The Change Request {{ change_request_number }} is invalid or does not exist."
+      when: cr_response.json.result | length == 0
+
+    - name: Extract Change Request state
+      set_fact:
+        cr_state: "{{ cr_response.json.result[0].state | lower }}"
+
+    - name: Fail if Change Request is not in an approved or open state
+      fail:
+        msg: "The Change Request {{ change_request_number }} is not in an approved or open state. Current state: {{ cr_state }}"
+      when: cr_state not in valid_states
+
+    - name: Get Change Tasks for the Change Request
+      uri:
+        url: "https://{{ servicenow_instance }}/api/now/table/change_task?sysparm_query=change_request.number={{ change_request_number }}"
+        method: GET
+        user: "{{ servicenow_username }}"
+        password: "{{ servicenow_password }}"
+        force_basic_auth: yes
+        return_content: yes
+        headers:
+          Accept: "application/json"
+      register: ctasks_response
       no_log: true
 
-    - name: Get and Validate Tasks
-      uri:
-        url: "{{ api_base }}/change_task?sysparm_query=change_request.number={{ cr_number }}&sysparm_fields=short_description,state,planned_start_date"
-        method: GET
-        user: "{{ snow_user }}"
-        password: "{{ snow_pass }}"
-        force_basic_auth: yes
-        headers: "{{ headers }}"
-        return_content: yes
-      register: tasks
-      no_log: true
+    - name: Verify if any Change Task has the title 'Connectivity'
+      set_fact:
+        connectivity_tasks: "{{ ctasks_response.json.result | selectattr('short_description', 'search', 'Connectivity') | list }}"
 
-    - name: Validate Tasks Match Requirements
-      assert:
-        that: >
-          {% for task in task_list %}
-          tasks.json.result | selectattr('short_description', 'search', task) | list | length == 1 and
-          (tasks.json.result | selectattr('short_description', 'search', task) | list)[0].state in ['ready', 'assigned', 'pending'] and
-          (tasks.json.result | selectattr('short_description', 'search', task) | list)[0].planned_start_date | regex_replace('T.*', '') == today
-          {{ ' and ' if not loop.last else '' }}
-          {% endfor %}
-        fail_msg: "One or more tasks failed validation"
-      register: result
+    - name: Fail if no 'Connectivity' tasks found
+      fail:
+        msg: "No 'Connectivity' task found for Change Request {{ change_request_number }}."
+      when: connectivity_tasks | length == 0
+
+    - name: Notify if Change Request and Connectivity Task are valid
+      debug:
+        msg: "The Change Request {{ change_request_number }} is valid, in {{ cr_state }} state, and contains a 'Connectivity' task. Proceeding..."
+
+    - name: Proceed with further tasks (example)
+      command: uptime
+      register: uptime_result
+
+    - name: Display system uptime
+      debug:
+        msg: "System uptime: {{ uptime_result.stdout }}"
