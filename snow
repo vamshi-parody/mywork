@@ -51,9 +51,10 @@
       register: ctasks_response
       no_log: true
 
-    - name: Verify if any Change Task has the title 'Connectivity'
-      set_fact:
-        connectivity_tasks: "{{ ctasks_response.json.result | selectattr('short_description', 'search', 'Connectivity') | list }}"
+   - name: Verify if any Change Task has the title 'Connectivity'
+  set_fact:
+    connectivity_tasks: "{{ ctasks_response.json.result[0].change_tasks | selectattr('short_description', 'equalto', 'Connectivity') | list }}"
+
 
     - name: Fail if no 'Connectivity' tasks found
       fail:
