@@ -1,0 +1,26 @@
+---
+- name: Copy files and execute script
+  hosts: all
+  become: true
+  tasks:
+    - name: Ensure /home/test directory exists
+      file:
+        path: /home/test
+        state: directory
+        mode: '0755'
+
+    - name: Copy test.csv to /home/test
+      copy:
+        src: test.csv
+        dest: /home/test/source.csv
+
+    - name: Copy test.sh to /home/test
+      copy:
+        src: test.sh
+        dest: /home/test/test.sh
+        mode: '0755'
+
+    - name: Execute test.sh
+      command: /home/test/test.sh
+      args:
+        chdir: /home/test
