@@ -1,92 +1,78 @@
-#!/bin/bash
-# Check dependencies
-for cmd in nc ping awk; do
-    if ! command -v $cmd &>/dev/null; then
-        echo "Error: $cmd is not installed"
-        exit 1
-    fi
-done
+---
+- name: Validate ServiceNow Change Record and Task
+  hosts: localhost
+  gather_facts: no
 
-# Input and output files
-input_file="input.csv"
-output_file="server_status.csv"
+  vars:
+    servicenow_instance: "your-instance.service-now.com"  # Replace with your ServiceNow instance
+    servicenow_username: "your-username"  # Replace with your ServiceNow username
+    servicenow_password: "your-password"  # Replace with your ServiceNow password
+    change_record_number: "CHG2408545"  # Input your Change Record number
+    change_task_number: "CTASK3701290"  # Input your Change Task number
+    short_description_match: "Connectivity"  # Variable for short description to match
 
-# Check if input file exists
-if [[ ! -f "$input_file" ]]; then
-    echo "Error: Input file $input_file not found!"
-    exit 1
-fi
+  tasks:
+    - name: Get current Ansible date
+      set_fact:
+        ansible_date: "{{ lookup('pipe', 'date +%Y-%m-%dT%H:%M:%S') }}"
+    
+    - name: Retrieve ServiceNow Change Record
+      uri:
+        url: "https://{{ servicenow_instance }}/api/now/table/change_request?sysparm_query=number={{ change_record_number }}"
+        method: GET
+        user: "{{ servicenow_username }}"
+        password: "{{ servicenow_password }}"
+        force_basic_auth: yes
+        return_content: yes
+        headers:
+          Accept: "application/json"
+      register: change_record_response
+      no_log: true
 
-# Function to check ping status
-check_ping() {
-    local ip=$1
-    ping -c 1 -W 2 "$ip" >/dev/null 2>&1
-    echo $([[ $? -eq 0 ]] && echo "1" || echo "0")
-}
+    - name: Fail if Change Record does not exist
+      fail:
+        msg: "The Change Record {{ change_record_number }} is invalid or does not exist."
+      when: change_record_response.json.result | length == 0
 
-# Function to check port status
-check_port() {
-    local ip=$1
-    local port=$2
-    local result
+    - name: Extract Change Record data
+      set_fact:
+        change_record: "{{ change_record_response.json.result[0] }}"
+    
+    - name: Validate Change Record state is 'New'
+      fail:
+        msg: "The Change Record {{ change_record_number }} is not in 'New' state. Current state: {{ change_record.state }}"
+      when: change_record.state | lower != "new"
 
-    result=$(nc -vz -w 3 "$ip" "$port" 2>&1)
-    if [ "$port" -eq 3389 ]; then
-        if [[ $result == *"refused"* ]] || [[ $result == *"succeeded"* ]]; then
-            echo "UP"
-        else
-            echo "DOWN"
-        fi
-    else
-        if [[ $result == *"succeeded"* ]] || [[ $result == *"Connected"* ]]; then
-            echo "UP"
-        else
-            echo "DOWN"
-        fi
-    fi
-}
+    - name: Validate Ansible date is within Change Record's start and end date
+      fail:
+        msg: "Ansible date {{ ansible_date }} is not between Change Record start date {{ change_record.planned_startdate }} and end date {{ change_record.planned_enddate }}."
+      when: not (ansible_date >= change_record.planned_startdate and ansible_date <= change_record.planned_enddate)
 
-# Function to process the input CSV
-process_csv() {
-    # Initialize the output CSV file with a header
-    echo "TimeStamp,ServerName,ServerStatus,ServerStatusCode,CMDBAppName,APMNumber,ApplicationName,RecoveryGroup,SubDivision,RTO" >"$output_file"
+    - name: Retrieve Change Tasks for the Change Record
+      set_fact:
+        change_tasks: "{{ change_record.change_tasks }}"
+    
+    - name: Check if specified Change Task exists
+      set_fact:
+        matching_task: "{{ change_tasks | selectattr('task_number', 'equalto', change_task_number) | list | first }}"
+      failed_when: matching_task is not defined
+      msg: "Change Task {{ change_task_number }} does not exist under Change Record {{ change_record_number }}."
 
-    # Process the input CSV
-    awk -F',' 'NR > 1 { print $1 "," $2 "," $3 "," $4 "," $5 "," $6 "," $7 "," $8 "," $9 }' "$input_file" | while IFS=',' read -r servername serverip asserttype cmdbapp apm appname recgroup subdiv rto; do
-        # Timestamp for each entry
-        timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    - name: Validate Change Task state is 'Implement'
+      fail:
+        msg: "Change Task {{ change_task_number }} is not in 'Implement' state. Current state: {{ matching_task.state }}"
+      when: matching_task.state | lower != "implement"
 
-        # Ping status
-        ping_status=$(check_ping "$serverip")
+    - name: Validate Change Task short description matches
+      fail:
+        msg: "Change Task {{ change_task_number }} short description does not match '{{ short_description_match }}'. Found: {{ matching_task.short_description }}"
+      when: matching_task.short_description != short_description_match
 
-        # Port selection based on assert type
-        if [[ "${asserttype,,}" == *"linux"* ]]; then
-            port=22
-        elif [[ "${asserttype,,}" == *"windows"* ]]; then
-            port=3389
-        else
-            echo "Skipping $servername: Unknown AssertType $asserttype"
-            continue
-        fi
+    - name: Validate Ansible date is within Change Task's dates
+      fail:
+        msg: "Ansible date {{ ansible_date }} is not between Change Task's start date and end date."
+      when: not (ansible_date >= matching_task.expected_start and ansible_date <= change_record.planned_enddate)
 
-        # Port status
-        service_status=$(check_port "$serverip" "$port")
-
-        # Append to the output CSV
-        echo "$timestamp,$servername,$service_status,$ping_status,$cmdbapp,$apm,$appname,$recgroup,$subdiv,$rto" >>"$output_file"
-    done
-
-    echo "Scan complete at $(date). Results saved to $output_file"
-}
-
-# Main loop to run every 5 minutes
-(
-    while true; do
-        echo "Starting a new scan at $(date)..."
-        process_csv
-        echo "Waiting for 5 minutes before the next run..."
-        sleep 300  # Wait for 5 minutes
-    done
-) &
-
-echo "Script is now running in the background. Process ID: $!"
+    - name: Success message
+      debug:
+        msg: "Validation passed: Change Record {{ change_record_number }} and Change Task {{ change_task_number }} are valid for processing."
