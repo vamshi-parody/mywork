@@ -1,26 +1,93 @@
----
-- name: Copy files and execute script
-  hosts: all
-  become: true
-  tasks:
-    - name: Ensure /home/test directory exists
-      file:
-        path: /home/test
-        state: directory
-        mode: '0755'
+#!/usr/bin/env bash
 
-    - name: Copy test.csv to /home/test
-      copy:
-        src: test.csv
-        dest: /home/test/source.csv
+# Variables
+MYDEFS="Tester24_3_definitions"
+MYLOGDIR=logs
+MYLOG="${MYLOGDIR}/$(basename $0 .sh)_$(date +%Y%m%d).log"
 
-    - name: Copy test.sh to /home/test
-      copy:
-        src: test.sh
-        dest: /home/test/test.sh
-        mode: '0755'
+# Create log directory
+mkdir -p ${MYLOGDIR}
 
-    - name: Execute test.sh
-      command: /home/test/test.sh
-      args:
-        chdir: /home/test
+# Export variables for use in the script
+export MYDEFS MYLOGDIR MYLOG
+
+# Function to log messages
+log_message() {
+    echo -e "$(date +'%Y-%m-%d %H:%M:%S') - $1" | tee -a ${MYLOG}
+}
+
+# Verify OpenStack RC file has been run
+log_message "Verifying OpenStack RC file..."
+if ! openstack project list > /dev/null; then
+    log_message "Error: OpenStack RC file not executed."
+    exit 1
+fi
+
+# Verify the project selected has "LGS" or "Tester" in the name
+log_message "Checking project name..."
+if ! openstack project list | grep -E "LGS|Tester"; then
+    log_message "Error: OpenStack project does not have LGS or Tester in the name."
+    exit 1
+fi
+
+# Delete all Tester servers
+log_message "Deleting Tester servers..."
+for myvm in 1 2 3; do
+    MYVMNAME="$(grep sitename ${MYDEFS} | cut -f2 -d' ')-vm-00${myvm}"
+    if openstack server show ${MYVMNAME} > /dev/null 2>&1; then
+        openstack server stop ${MYVMNAME}
+        sleep 20
+        if ! openstack server delete ${MYVMNAME}; then
+            log_message "Error: Failed to delete ${MYVMNAME}. Check the GUI and delete the VM manually."
+        fi
+    fi
+done
+
+# Delete all ports with "Testervm" in the name
+log_message "Deleting ports..."
+while read -r myport; do
+    if openstack port delete ${myport}; then
+        log_message "Port ${myport} deleted."
+    else
+        log_message "Warning: Deletion of ${myport} may have failed. Use the GUI to delete the port."
+    fi
+done < <(grep Testervm ${MYDEFS} | cut -f2 -d' ')
+
+# Verify all ports with "Testervm" are deleted
+log_message "Verifying port deletion..."
+if openstack port list | grep Testervm; then
+    log_message "Error: Ports with 'Testervm' in the name found. Use the GUI to delete them."
+    openstack port list | grep Testervm | tee -a ${MYLOG}
+else
+    log_message "No ports for 'Tester' found."
+fi
+
+# Delete the Tester keypair
+KEYPAIR="$(grep sitename ${MYDEFS} | cut -f2 -d' ')-ssh"
+log_message "Deleting keypair ${KEYPAIR}..."
+if openstack keypair delete ${KEYPAIR}; then
+    log_message "Keypair ${KEYPAIR} deleted."
+else
+    log_message "Error: Unable to delete keypair ${KEYPAIR}. Use the GUI to delete the keypair."
+fi
+
+# Cleanup known_hosts file
+log_message "Cleaning up known_hosts file..."
+cp -p $HOME/.ssh/known_hosts $HOME/.ssh/$(date +%Y%m%d)_known_hosts
+while read -r MYIPV6; do
+    sed -i "/${MYIPV6}/d" $HOME/.ssh/known_hosts
+done < <(grep vm._oam ${MYDEFS} | awk '{print $3}')
+
+# Delete the volumes for the Tester VMs
+log_message "Deleting volumes..."
+openstack volume list --sort-column Name | grep vm- | awk '{print $4}' | while read -r MYVOL; do
+    if ! openstack volume delete ${MYVOL}; then
+        log_message "Warning: Deletion of volume ${MYVOL} failed. Use the GUI to delete the volume."
+    else
+        log_message "Volume ${MYVOL} deleted."
+    fi
+done
+
+# Remove temporary files that may be left over
+log_message "Removing temporary files..."
+rm -f my_del_volumes my_networks my_projects
